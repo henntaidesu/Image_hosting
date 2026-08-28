@@ -1,7 +1,9 @@
 import io
 import shutil
+import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from PIL import Image
@@ -14,6 +16,39 @@ def png_file(name="image.png"):
     Image.new("RGB", (2, 2), "cyan").save(data, "PNG")
     data.seek(0)
     return data, name
+
+
+class DatabaseLocationTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+        self.original_data_dir = picture_bed.DATA_DIR
+        self.original_upload_dir = picture_bed.UPLOAD_DIR
+        self.original_database = picture_bed.DATABASE
+
+    def tearDown(self):
+        picture_bed.DATA_DIR = self.original_data_dir
+        picture_bed.UPLOAD_DIR = self.original_upload_dir
+        picture_bed.DATABASE = self.original_database
+        self.temp_dir.cleanup()
+
+    def test_init_storage_moves_legacy_database_to_runtime_root(self):
+        picture_bed.DATA_DIR = self.root / "data"
+        picture_bed.UPLOAD_DIR = picture_bed.DATA_DIR / "uploads"
+        picture_bed.DATABASE = self.root / "picture_bed.sqlite3"
+        legacy_database = picture_bed.DATA_DIR / "picture_bed.sqlite3"
+        legacy_database.parent.mkdir(parents=True)
+        with closing(sqlite3.connect(legacy_database)) as db:
+            db.execute("CREATE TABLE migration_marker (value TEXT)")
+            db.execute("INSERT INTO migration_marker VALUES ('kept')")
+            db.commit()
+
+        picture_bed.init_storage()
+
+        self.assertTrue(picture_bed.DATABASE.is_file())
+        self.assertFalse(legacy_database.exists())
+        with closing(sqlite3.connect(picture_bed.DATABASE)) as db:
+            self.assertEqual(db.execute("SELECT value FROM migration_marker").fetchone()[0], "kept")
 
 
 class StorageRoutingTests(unittest.TestCase):

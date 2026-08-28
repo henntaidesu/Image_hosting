@@ -19,9 +19,10 @@ BASE_DIR = Path(__file__).resolve().parent
 # PyInstaller extracts bundled templates and static files to a temporary folder.
 # Keep mutable application data beside the executable instead so it persists
 # across launches of the packaged application.
-DATA_DIR = (Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else BASE_DIR) / "data"
+RUNTIME_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else BASE_DIR
+DATA_DIR = RUNTIME_DIR / "data"
 UPLOAD_DIR = DATA_DIR / "uploads"
-DATABASE = DATA_DIR / "picture_bed.sqlite3"
+DATABASE = RUNTIME_DIR / "picture_bed.sqlite3"
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "avif"}
 
 app = Flask(__name__)
@@ -34,6 +35,9 @@ class StorageUnavailableError(ValueError):
 def init_storage():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    legacy_database = DATA_DIR / "picture_bed.sqlite3"
+    if legacy_database != DATABASE and not DATABASE.exists() and legacy_database.is_file():
+        shutil.move(str(legacy_database), str(DATABASE))
     with closing(sqlite3.connect(DATABASE)) as db:
         db.execute("PRAGMA foreign_keys = ON")
         db.executescript("""

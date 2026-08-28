@@ -66,6 +66,7 @@ db.sqlite3-journal
 instance/
 .webassets-cache
 data/
+picture_bed.sqlite3
 .venv/
 
 # Scrapy stuff:
