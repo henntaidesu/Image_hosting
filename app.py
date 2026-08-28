@@ -2,6 +2,7 @@ import os
 import secrets
 import shutil
 import sqlite3
+import sys
 import uuid
 from contextlib import closing
 from datetime import datetime, timezone
@@ -15,7 +16,10 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 
 BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
+# PyInstaller extracts bundled templates and static files to a temporary folder.
+# Keep mutable application data beside the executable instead so it persists
+# across launches of the packaged application.
+DATA_DIR = (Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else BASE_DIR) / "data"
 UPLOAD_DIR = DATA_DIR / "uploads"
 DATABASE = DATA_DIR / "picture_bed.sqlite3"
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "avif"}
