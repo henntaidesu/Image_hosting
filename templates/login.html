@@ -1,0 +1,3 @@
+{% extends 'base.html' %}{% block title %}登录管理端 · Picture Bed{% endblock %}{% block content %}
+<section class="login-card"><h1>图床管理</h1><p>使用管理员密码登录。</p><form method="post"><input type="hidden" name="next" value="{{ next }}"><label>管理员密码<input name="password" type="password" autofocus required></label><button>登录</button></form></section>
+{% endblock %}

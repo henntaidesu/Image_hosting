@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+{% block content %}
+{% if using_default_password %}<div class="notice error">当前仍使用首次启动密码 <code>admin</code>。请立即前往<a href="{{ url_for('settings') }}">系统设置</a>修改。</div>{% endif %}
+<section class="panel">
+  <h2>新建项目</h2>
+  <form class="project-form" action="{{ url_for('create_project') }}" method="post">
+    <label>项目名称<input name="name" placeholder="例如：官网" required></label>
+    <label class="path-field">图片存储路径<input name="storage_path" placeholder="例如：D:\PictureBed\website" required></label>
+    <button>创建项目</button>
+  </form>
+</section>
+<section>
+  <h2>已有项目</h2>
+  {% if projects %}<div class="project-grid">{% for project in projects %}
+  <a class="project-card" href="{{ url_for('project_detail', slug=project.slug) }}"><h3>{{ project.name }}</h3><code title="{{ project.storage_path }}">{{ project.storage_path }}</code><p>{{ project.image_count }} 张图片 · {{ '%.1f'|format(project.total_size / 1024 / 1024) }} MB</p></a>
+  {% endfor %}</div>{% else %}<p class="empty">还没有项目。先指定一个图片存储目录来开始上传。</p>{% endif %}
+</section>
+{% endblock %}

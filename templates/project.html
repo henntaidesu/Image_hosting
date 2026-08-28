@@ -1,0 +1,30 @@
+{% extends 'base.html' %}
+{% block title %}{{ project.name }} · Picture Bed{% endblock %}
+{% block content %}
+<a class="back" href="{{ url_for('dashboard') }}">← 所有项目</a>
+<div class="heading"><div><p class="eyebrow">项目</p><h1>{{ project.name }}</h1></div></div>
+
+<section class="panel">
+  <div class="section-title"><div><h2>存储位置</h2></div></div>
+  <div class="location-list">
+    {% for location in locations %}{% set status = storage_status(location) %}
+    <article class="location-card {% if not location.is_enabled %}is-disabled{% endif %} {% if location.is_active %}is-current{% endif %}">
+      <div class="location-summary"><div><h3>{{ location.name }}</h3><code title="{{ location.path }}">{{ location.path }}</code></div><span class="status {% if location.is_active %}active{% else %}inactive{% endif %}">{% if location.is_active %}当前写入{% elif not location.is_enabled %}已停用{% elif status.available %}可切换{% else %}不可访问{% endif %}</span></div>
+      <p class="location-metrics">故障切换优先级 {{ location.priority }} · 保留 {{ location.reserve_mb }} MB · {{ location.image_count }} 张图片{% if status.available %} · 剩余 {{ status.free_text }} / {{ status.total_text }}{% endif %}</p>
+      <div class="location-actions">
+        <form action="{{ url_for('update_storage_location', slug=project.slug, location_id=location.id) }}" method="post" class="location-edit"><input name="name" value="{{ location.name }}" aria-label="存储位置名称"><label>优先级<input name="priority" type="number" min="1" max="9999" value="{{ location.priority }}"></label><label>保留 MB<input name="reserve_mb" type="number" min="0" max="1048576" value="{{ location.reserve_mb }}"></label><button>保存</button></form>
+        {% if not location.is_active %}<form action="{{ url_for('activate_storage_location', slug=project.slug, location_id=location.id) }}" method="post"><button type="submit" {% if not location.is_enabled %}disabled{% endif %}>切换到此位置</button></form>{% endif %}
+        <form action="{{ url_for('toggle_storage_location', slug=project.slug, location_id=location.id) }}" method="post"><button type="submit">{{ '停用写入' if location.is_enabled else '启用写入' }}</button></form>
+        {% if not location.image_count %}<form action="{{ url_for('delete_storage_location', slug=project.slug, location_id=location.id) }}" method="post"><button class="danger" onclick="return confirm('仅删除该位置的配置，不会删除磁盘上的文件。确定继续吗？')">删除配置</button></form>{% endif %}
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  <details class="add-location"><summary>添加存储位置</summary><form action="{{ url_for('add_storage_location', slug=project.slug) }}" method="post" class="add-location-form"><label>名称<input name="name" placeholder="例如：第二硬盘"></label><label class="path-field">绝对路径<input name="path" placeholder="例如：E:\PictureBed\website" required></label><label>故障切换优先级<input name="priority" type="number" min="1" max="9999" value="20" required></label><label>保留空间（MB）<input name="reserve_mb" type="number" min="0" max="1048576" value="1024" required></label><button>添加并切换</button></form></details>
+</section>
+
+<section class="panel"><h2>上传图片</h2><form action="{{ url_for('admin_upload', slug=project.slug) }}" method="post" enctype="multipart/form-data" class="upload-form"><input type="file" name="files" accept="image/*" multiple required><button>上传</button></form></section>
+<section class="panel"><h2>项目 API</h2><div class="token"><code id="api-token">{{ project.api_token }}</code><button type="button" data-copy="#api-token">复制 Token</button><form action="{{ url_for('rotate_token', slug=project.slug) }}" method="post"><button class="danger" onclick="return confirm('重新生成后，旧 Token 会立刻失效。确定继续吗？')">重置 Token</button></form></div><pre>curl -X POST "https://你的域名/api/v1/projects/{{ project.slug }}/images" \
+  -H "Authorization: Bearer {{ project.api_token }}" -F "file=@photo.png"</pre></section>
+<section><h2>图片（{{ images|length }}）</h2>{% if images %}<div class="image-grid">{% for image in images %}{% set image_url = public_image_url(project.slug, image.stored_name) %}<article class="image-card"><a href="{{ image_url }}" target="_blank"><img loading="lazy" src="{{ image_url }}" alt="{{ image.original_name }}"></a><div><strong title="{{ image.original_name }}">{{ image.original_name }}</strong><small>{{ '%.1f'|format(image.size / 1024) }} KB{% if image.location_name %} · {{ image.location_name }}{% endif %}</small><div class="image-actions"><button type="button" data-copy-text="{{ image_url }}">复制链接</button><form action="{{ url_for('delete_image', slug=project.slug, stored_name=image.stored_name) }}" method="post"><button class="danger" onclick="return confirm('确定删除这张图片吗？')">删除</button></form></div></div></article>{% endfor %}</div>{% else %}<p class="empty">此项目暂无图片。</p>{% endif %}</section>
+{% endblock %}
