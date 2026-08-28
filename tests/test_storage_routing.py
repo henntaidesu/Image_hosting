@@ -11,6 +11,14 @@ from PIL import Image
 import app as picture_bed
 
 
+SECURITY_CONFIG_KEYS = (
+    "MAX_CONTENT_LENGTH",
+    "MAX_FORM_MEMORY_SIZE",
+    "MAX_FORM_PARTS",
+    "TRUSTED_HOSTS",
+)
+
+
 def png_file(name="image.png"):
     data = io.BytesIO()
     Image.new("RGB", (2, 2), "cyan").save(data, "PNG")
@@ -58,16 +66,18 @@ class StorageRoutingTests(unittest.TestCase):
         self.original_data_dir = picture_bed.DATA_DIR
         self.original_upload_dir = picture_bed.UPLOAD_DIR
         self.original_database = picture_bed.DATABASE
+        self.original_security_config = {key: picture_bed.app.config[key] for key in SECURITY_CONFIG_KEYS}
         picture_bed.DATA_DIR = self.root / "data"
         picture_bed.UPLOAD_DIR = picture_bed.DATA_DIR / "uploads"
         picture_bed.DATABASE = picture_bed.DATA_DIR / "picture_bed.sqlite3"
         picture_bed.init_storage()
+        picture_bed.configure_runtime_security(20, "")
         picture_bed.app.config.update(TESTING=True, SECRET_KEY=picture_bed.get_setting("secret_key"))
         self.client = picture_bed.app.test_client()
-        self.client.post("/login", data={"password": "admin"})
+        self.client.post("/login", data={"password": "admin", "csrf_token": self.csrf_token("/login")})
         self.primary = self.root / "primary"
         self.secondary = self.root / "secondary"
-        self.client.post("/projects", data={"name": "测试项目", "storage_path": str(self.primary)})
+        self.post("/projects", data={"name": "测试项目", "storage_path": str(self.primary)})
         with picture_bed.app.app_context():
             self.project = picture_bed.get_db().execute("SELECT * FROM projects").fetchone()
             self.primary_location = picture_bed.get_db().execute(
@@ -78,10 +88,22 @@ class StorageRoutingTests(unittest.TestCase):
         picture_bed.DATA_DIR = self.original_data_dir
         picture_bed.UPLOAD_DIR = self.original_upload_dir
         picture_bed.DATABASE = self.original_database
+        picture_bed.app.config.update(self.original_security_config)
         self.temp_dir.cleanup()
 
+    def csrf_token(self, path="/"):
+        response = self.client.get(path)
+        self.assertEqual(response.status_code, 200)
+        with self.client.session_transaction() as client_session:
+            return client_session["csrf_token"]
+
+    def post(self, path, data=None, **kwargs):
+        data = dict(data or {})
+        data["csrf_token"] = self.csrf_token()
+        return self.client.post(path, data=data, **kwargs)
+
     def add_secondary_location(self):
-        response = self.client.post(
+        response = self.post(
             f"/projects/{self.project['slug']}/storage-locations",
             data={"name": "第二硬盘", "path": str(self.secondary), "priority": "20", "reserve_mb": "0"},
         )
@@ -94,7 +116,7 @@ class StorageRoutingTests(unittest.TestCase):
 
     def upload_and_get_location(self, filename):
         image, filename = png_file(filename)
-        response = self.client.post(
+        response = self.post(
             f"/projects/{self.project['slug']}/upload",
             data={"files": (image, filename)},
             content_type="multipart/form-data",
@@ -117,7 +139,7 @@ class StorageRoutingTests(unittest.TestCase):
         self.assertTrue((self.secondary / added_image["stored_name"]).is_file())
 
         # A manual switch immediately changes the target of new uploads.
-        response = self.client.post(
+        response = self.post(
             f"/projects/{self.project['slug']}/storage-locations/{self.primary_location['id']}/activate"
         )
         self.assertEqual(response.status_code, 302)

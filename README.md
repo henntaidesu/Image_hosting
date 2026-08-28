@@ -9,7 +9,8 @@ cd Picture_bed
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python app.py
+$env:PICTURE_BED_INSECURE_COOKIES = "1"  # 本机 HTTP 开发时使用；公网部署不要设置
+python serve.py
 ```
 
 也可以直接双击 `start.bat`；它会激活已创建的 `picture-bed` Conda 环境并启动服务。

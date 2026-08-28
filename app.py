@@ -4,13 +4,16 @@ import shutil
 import sqlite3
 import sys
 import uuid
+import warnings
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from flask import Flask, abort, flash, g, jsonify, redirect, render_template, request, send_from_directory, session, url_for
 from PIL import Image, UnidentifiedImageError
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -24,8 +27,14 @@ DATA_DIR = RUNTIME_DIR / "data"
 UPLOAD_DIR = DATA_DIR / "uploads"
 DATABASE = RUNTIME_DIR / "picture_bed.sqlite3"
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "avif"}
+MAX_IMAGE_PIXELS = 25_000_000
+MAX_IMAGE_FRAMES = 200
+MAX_UPLOAD_FILES = 20
+INSECURE_LOCAL_MODE = os.environ.get("PICTURE_BED_INSECURE_COOKIES") == "1"
+LOCAL_HOSTS = ("localhost", "127.0.0.1", "[::1]")
 
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 
 
 class StorageUnavailableError(ValueError):
@@ -147,7 +156,35 @@ def set_setting(key, value):
     get_db().commit()
 
 
-app.config["SECRET_KEY"] = get_setting("secret_key")
+def configured_trusted_hosts(public_base_url=None):
+    public_base_url = public_base_url if public_base_url is not None else get_setting("public_base_url")
+    hostname = urlsplit(public_base_url).hostname if public_base_url else None
+    hosts = [hostname] if hostname else []
+    if INSECURE_LOCAL_MODE or not hosts:
+        hosts.extend(LOCAL_HOSTS)
+    return hosts
+
+
+def configure_runtime_security(max_upload_mb=None, public_base_url=None):
+    max_upload_mb = int(max_upload_mb if max_upload_mb is not None else get_setting("max_upload_mb"))
+    app.config.update(
+        MAX_CONTENT_LENGTH=max_upload_mb * 1024 * 1024,
+        MAX_FORM_MEMORY_SIZE=64 * 1024,
+        MAX_FORM_PARTS=MAX_UPLOAD_FILES + 10,
+        TRUSTED_HOSTS=configured_trusted_hosts(public_base_url),
+    )
+
+
+app.config.update(
+    SECRET_KEY=get_setting("secret_key"),
+    SESSION_COOKIE_NAME="picture-bed-session" if INSECURE_LOCAL_MODE else "__Host-picture-bed-session",
+    SESSION_COOKIE_SECURE=not INSECURE_LOCAL_MODE,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
+    PREFERRED_URL_SCHEME="http" if INSECURE_LOCAL_MODE else "https",
+)
+configure_runtime_security()
 
 
 def get_db():
@@ -167,6 +204,56 @@ def close_db(_error):
 
 def now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def csrf_token():
+    token = session.get("csrf_token")
+    if token is None:
+        token = secrets.token_urlsafe(32)
+        session["csrf_token"] = token
+    return token
+
+
+def safe_redirect_target(value):
+    if not value or not value.startswith("/") or value.startswith("//"):
+        return None
+    parsed = urlsplit(value)
+    return value if not parsed.scheme and not parsed.netloc else None
+
+
+def validate_public_base_url(value):
+    if not value:
+        return ""
+    parsed = urlsplit(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("公开访问基地址必须是有效的 HTTP(S) 地址。")
+    if parsed.query or parsed.fragment:
+        raise ValueError("公开访问基地址不能包含查询参数或片段。")
+    if not INSECURE_LOCAL_MODE and parsed.scheme != "https":
+        raise ValueError("公网部署的公开访问基地址必须使用 HTTPS。")
+    return value.rstrip("/")
+
+
+@app.before_request
+def validate_csrf():
+    if request.method not in {"POST", "PUT", "PATCH", "DELETE"} or request.endpoint == "api_upload":
+        return
+    expected = session.get("csrf_token")
+    provided = request.form.get("csrf_token", "")
+    if not expected or not provided or not secrets.compare_digest(expected, provided):
+        abort(400, "CSRF token 无效或缺失。")
+
+
+@app.after_request
+def set_security_headers(response):
+    response.headers.setdefault("Content-Security-Policy", "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; img-src 'self' data:; style-src 'self'; script-src 'self'")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Permissions-Policy", "camera=(), geolocation=(), microphone=()")
+    if not request.path.startswith(("/images/", "/static/")):
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
 
 
 def admin_required(view):
@@ -307,18 +394,27 @@ def public_image_url(slug, stored_name):
 
 @app.context_processor
 def template_helpers():
-    return {"get_setting": get_setting, "public_image_url": public_image_url, "storage_status": storage_status}
+    return {
+        "csrf_token": csrf_token,
+        "get_setting": get_setting,
+        "public_image_url": public_image_url,
+        "storage_status": storage_status,
+    }
 
 
 def image_is_safe(file):
     try:
-        image = Image.open(file.stream)
-        image.verify()
-        file.stream.seek(0)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            image = Image.open(file.stream)
+            if image.width * image.height > MAX_IMAGE_PIXELS or getattr(image, "n_frames", 1) > MAX_IMAGE_FRAMES:
+                return False
+            image.verify()
         return True
-    except (UnidentifiedImageError, OSError):
-        file.stream.seek(0)
+    except (Image.DecompressionBombError, Image.DecompressionBombWarning, UnidentifiedImageError, OSError):
         return False
+    finally:
+        file.stream.seek(0)
 
 
 def upload_limit_bytes():
@@ -382,7 +478,8 @@ def login():
         if check_password_hash(get_setting("admin_password_hash"), request.form.get("password", "")):
             session.clear()
             session["is_admin"] = True
-            return redirect(request.form.get("next") or url_for("dashboard"))
+            session.permanent = True
+            return redirect(safe_redirect_target(request.form.get("next")) or url_for("dashboard"))
         flash("密码不正确。", "error")
     return render_template("login.html", next=request.args.get("next", ""))
 
@@ -409,7 +506,7 @@ def dashboard():
 def settings():
     if request.method == "POST":
         max_upload_mb = request.form.get("max_upload_mb", "").strip()
-        public_base_url = request.form.get("public_base_url", "").strip().rstrip("/")
+        public_base_url = request.form.get("public_base_url", "").strip()
         password = request.form.get("password", "")
         password_confirm = request.form.get("password_confirm", "")
         try:
@@ -419,8 +516,10 @@ def settings():
         except ValueError:
             flash("单文件大小上限必须是 1 到 1024 之间的整数（MB）。", "error")
             return redirect(url_for("settings"))
-        if public_base_url and not (public_base_url.startswith("http://") or public_base_url.startswith("https://")):
-            flash("公开访问基地址必须以 http:// 或 https:// 开头。", "error")
+        try:
+            public_base_url = validate_public_base_url(public_base_url)
+        except ValueError as error:
+            flash(str(error), "error")
             return redirect(url_for("settings"))
         if password:
             if len(password) < 8:
@@ -432,6 +531,7 @@ def settings():
             set_setting("admin_password_hash", generate_password_hash(password))
         set_setting("max_upload_mb", str(max_upload_number))
         set_setting("public_base_url", public_base_url)
+        configure_runtime_security(max_upload_number, public_base_url)
         flash("系统设置已保存。", "success")
         return redirect(url_for("settings"))
     return render_template("settings.html", max_upload_mb=get_setting("max_upload_mb"), public_base_url=get_setting("public_base_url"))
@@ -631,11 +731,12 @@ def admin_upload(slug):
     project = project_for_slug(slug)
     if not project:
         abort(404)
-    files = request.files.getlist("files")
+    files = [file for file in request.files.getlist("files") if file and file.filename]
+    if len(files) > MAX_UPLOAD_FILES:
+        flash(f"单次最多上传 {MAX_UPLOAD_FILES} 个文件。", "error")
+        return redirect(url_for("project_detail", slug=slug))
     uploaded, errors = 0, []
     for file in files:
-        if not file or not file.filename:
-            continue
         try:
             save_upload(project, file)
             uploaded += 1
@@ -710,4 +811,6 @@ def public_image(slug, stored_name):
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=8000)
+    from waitress import serve
+
+    serve(app, host="127.0.0.1", port=8000, threads=4)

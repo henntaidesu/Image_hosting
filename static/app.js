@@ -8,3 +8,9 @@ document.querySelectorAll('[data-copy], [data-copy-text]').forEach((button) => {
     setTimeout(() => { button.textContent = label; }, 1200);
   });
 });
+
+document.querySelectorAll('form[data-confirm]').forEach((form) => {
+  form.addEventListener('submit', (event) => {
+    if (!window.confirm(form.dataset.confirm)) event.preventDefault();
+  });
+});

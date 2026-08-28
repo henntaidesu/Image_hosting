@@ -26,6 +26,14 @@ if errorlevel 1 (
 
 cd /d "%PROJECT_DIR%"
 
+python -c "import flask, PIL, waitress" >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] Runtime dependencies are missing in "%ENV_NAME%".
+    echo Run: python -m pip install -r requirements.txt
+    pause
+    exit /b 1
+)
+
 python -c "import PyInstaller" >nul 2>&1
 if errorlevel 1 (
     echo [ERROR] PyInstaller is not installed in "%ENV_NAME%".
@@ -49,7 +57,7 @@ python -m PyInstaller --onefile --clean --noconfirm ^
     --distpath "%RELEASE_DIR%" ^
     --workpath "%BUILD_DIR%" ^
     --specpath "%SPEC_DIR%" ^
-    app.py
+    serve.py
 
 if errorlevel 1 (
     echo [ERROR] Packaging failed.
