@@ -1,1 +1,1 @@
-"""Picture Bed application package."""
+"""Image Hosting application package."""

@@ -1,4 +1,4 @@
-"""Picture Bed entry point.
+"""Image Hosting entry point.
 
 The implementation lives in ``src``. This remains the only startup entry used
 by Python, the Windows batch files, and PyInstaller.

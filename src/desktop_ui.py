@@ -12,7 +12,7 @@ from typing import Callable
 from . import config
 
 
-APP_NAME = "Picture Bed"
+APP_NAME = "Image Hosting"
 _MAX_LINES = 5_000
 _LOG_QUEUE: queue.Queue[str] = queue.Queue(maxsize=5_000)
 _COMMAND_QUEUE: queue.Queue[str] = queue.Queue(maxsize=64)
@@ -77,7 +77,7 @@ def start(on_exit: Callable[[], None]) -> bool:
     _started = True
     _on_exit = on_exit
     _install_log_tee()
-    threading.Thread(target=_ui_main, name="picture-bed-log-window", daemon=True).start()
+    threading.Thread(target=_ui_main, name="image-hosting-log-window", daemon=True).start()
     return True
 
 
@@ -121,7 +121,7 @@ def start_tray(on_exit: Callable[[], None]) -> bool:
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("退出程序", exit_app),
     )
-    _tray_icon = pystray.Icon("PictureBed", image, APP_NAME, menu)
+    _tray_icon = pystray.Icon("ImageHosting", image, APP_NAME, menu)
     _tray_icon.run_detached()
     return True
 
@@ -292,11 +292,11 @@ def _ask_close_action(root) -> str:  # noqa: ANN001
 
     body = tk.Frame(dialog, padx=20, pady=16)
     body.pack(fill="both", expand=True)
-    tk.Label(body, text="确定要关闭 Picture Bed 吗？", font=("Microsoft YaHei UI", 11, "bold")).pack(anchor="w")
+    tk.Label(body, text="确定要关闭 Image Hosting 吗？", font=("Microsoft YaHei UI", 11, "bold")).pack(anchor="w")
     tk.Label(
         body,
         text="收至任务栏：隐藏运行窗口，服务继续在后台运行。\n"
-        "退出程序：停止图片床服务并完全退出。",
+        "退出程序：停止图片托管服务并完全退出。",
         justify="left",
         font=("Microsoft YaHei UI", 9),
     ).pack(anchor="w", pady=(8, 16))

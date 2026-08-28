@@ -1,4 +1,4 @@
-"""HTTP routes for the Picture Bed web application."""
+"""HTTP routes for the Image Hosting web application."""
 
 import secrets
 import sqlite3

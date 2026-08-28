@@ -21,7 +21,7 @@ if errorlevel 1 (
 )
 
 cd /d "%PROJECT_DIR%"
-echo Picture Bed is starting in secure public-listen mode on 0.0.0.0:9990
+echo Image Hosting is starting in secure public-listen mode on 0.0.0.0:9990
 python app.py
 
 if errorlevel 1 pause

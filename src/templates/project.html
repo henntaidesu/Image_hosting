@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}{{ project.name }} · Picture Bed{% endblock %}
+{% block title %}{{ project.name }} · Image Hosting{% endblock %}
 {% block content %}
 <a class="back" href="{{ url_for('dashboard') }}">← 所有项目</a>
 <div class="heading"><div><p class="eyebrow">项目</p><h1>{{ project.name }}</h1></div></div>
@@ -20,7 +20,7 @@
     </article>
     {% endfor %}
   </div>
-  <details class="add-location"><summary>添加存储位置</summary><form action="{{ url_for('add_storage_location', slug=project.slug) }}" method="post" class="add-location-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>名称<input name="name" placeholder="例如：第二硬盘"></label><label class="path-field">绝对路径<input name="path" placeholder="例如：E:\PictureBed\website" required></label><label>故障切换优先级<input name="priority" type="number" min="1" max="9999" value="20" required></label><label>保留空间（MB）<input name="reserve_mb" type="number" min="0" max="1048576" value="1024" required></label><button>添加并切换</button></form></details>
+  <details class="add-location"><summary>添加存储位置</summary><form action="{{ url_for('add_storage_location', slug=project.slug) }}" method="post" class="add-location-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>名称<input name="name" placeholder="例如：第二硬盘"></label><label class="path-field">绝对路径<input name="path" placeholder="例如：E:\ImageHosting\website" required></label><label>故障切换优先级<input name="priority" type="number" min="1" max="9999" value="20" required></label><button>添加并切换</button></form></details>
 </section>
 
 <section class="panel"><h2>上传图片</h2><form action="{{ url_for('admin_upload', slug=project.slug) }}" method="post" enctype="multipart/form-data" class="upload-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="file" name="files" accept="image/*" multiple required><button>上传</button></form></section>

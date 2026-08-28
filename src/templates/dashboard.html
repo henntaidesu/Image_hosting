@@ -6,7 +6,7 @@
   <form class="project-form" action="{{ url_for('create_project') }}" method="post">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label>项目名称<input name="name" placeholder="例如：官网" required></label>
-    <label class="path-field">图片存储路径<input name="storage_path" placeholder="例如：D:\PictureBed\website" required></label>
+    <label class="path-field">图片存储路径<input name="storage_path" placeholder="例如：D:\ImageHosting\website" required></label>
     <button>创建项目</button>
   </form>
 </section>

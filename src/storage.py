@@ -24,7 +24,7 @@ def validate_storage_path(value):
         raise ValueError("图片存储路径不能为空。")
     path = Path(value).expanduser()
     if not path.is_absolute():
-        raise ValueError("图片存储路径必须是绝对路径，例如 D:\\PictureBed\\website。")
+        raise ValueError("图片存储路径必须是绝对路径，例如 D:\\ImageHosting\\website。")
     if path.exists() and not path.is_dir():
         raise ValueError("图片存储路径指向了一个文件，请选择目录。")
     return path.resolve()
