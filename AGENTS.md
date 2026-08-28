@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-`app.py` is the complete Flask application: routes, SQLite access, authentication, image validation, and storage routing live here. Keep related helpers near the routes that use them until the application is intentionally split into modules. Server-rendered pages are in `templates/`; browser assets are in `static/`. Tests belong in `tests/` and use isolated temporary directories. Runtime state—SQLite data and local uploads—belongs in `data/` and is intentionally ignored by Git.
+`app.py` is the only executable entry point. Application code lives in `src/`: `app_factory.py` constructs Flask, `routes.py` defines HTTP endpoints, `database.py` owns SQLite access, `security.py` handles request protections, `storage.py` validates and routes images, and `server.py` controls Waitress and the packaged desktop UI. Server-rendered pages are in `src/templates/`; browser assets are in `src/static/`. Security deployment documentation lives in `docs/`. Tests belong in `tests/` and use isolated temporary directories. Runtime state—SQLite data and local uploads—belongs in `data/` and is intentionally ignored by Git.
 
 ## Build, Test, and Development Commands
 
@@ -15,7 +15,7 @@ pip install -r requirements.txt
 python app.py
 ```
 
-The service listens on `http://127.0.0.1:8000`. `start.bat` is the Windows shortcut for an existing Conda environment named `picture-bed`. Run the automated checks with:
+The service listens on `0.0.0.0:9990`; access it locally at `http://127.0.0.1:9990`. `start.bat` is the Windows shortcut for an existing Conda environment named `picture-bed`. Run the automated checks with:
 
 ```powershell
 python -m unittest discover -s tests -v

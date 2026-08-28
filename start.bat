@@ -21,7 +21,7 @@ if errorlevel 1 (
 )
 
 cd /d "%PROJECT_DIR%"
-echo Picture Bed is starting in secure reverse-proxy mode on 127.0.0.1:8000
-python serve.py
+echo Picture Bed is starting in secure public-listen mode on 0.0.0.0:9990
+python app.py
 
 if errorlevel 1 pause

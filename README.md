@@ -10,14 +10,22 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 $env:PICTURE_BED_INSECURE_COOKIES = "1"  # 本机 HTTP 开发时使用；公网部署不要设置
-python serve.py
+python app.py
 ```
 
 也可以直接双击 `start.bat`；它会激活已创建的 `picture-bed` Conda 环境并启动服务。
 
-打开 `http://127.0.0.1:8000` 登录管理端。首次密码为 `admin`；请立即进入“系统设置”改为至少 8 个字符的强密码。
+打开 `http://127.0.0.1:9990` 登录管理端。首次密码为 `admin`；请立即进入“系统设置”改为至少 8 个字符的强密码。
 
 管理员密码哈希、会话密钥、上传大小上限、公开访问基地址、项目与图片索引均保存在 SQLite 数据库中，无需 `.env` 文件。数据库位于 `data/`；请连同所有配置的图片存储目录一起备份。
+
+## 项目结构
+
+- `app.py`：唯一启动入口，负责创建应用并启动 Waitress。
+- `src/`：应用代码，以及 `templates/`、`static/` 页面资源。
+- `tests/`：隔离运行的自动化测试。
+- `docs/`：安全部署文档。
+- `data/`：SQLite 数据库及默认上传目录，不纳入 Git。
 
 创建项目（如 `website`）后，图片会通过以下路径公开：
 
@@ -34,7 +42,7 @@ http://你的域名/images/website/随机文件名.png
 在项目详情中复制其 API Token，然后以 `multipart/form-data` 调用：
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/api/v1/projects/website/images" \
+curl -X POST "http://127.0.0.1:9990/api/v1/projects/website/images" \
   -H "Authorization: Bearer <项目 API Token>" \
   -F "file=@./logo.png"
 ```
@@ -43,4 +51,6 @@ curl -X POST "http://127.0.0.1:8000/api/v1/projects/website/images" \
 
 ## 对外部署
 
-通过 Nginx 或 Caddy 将本机的 `127.0.0.1:8000` 反向代理为 HTTPS 域名，然后在“系统设置”中填写该公网域名。管理端复制的图片链接与 API 返回地址会自动使用这个基地址。
+服务默认监听 `0.0.0.0:9990`。通过 Nginx 或 Caddy 将本机的 `127.0.0.1:9990` 反向代理为 HTTPS 域名，然后在“系统设置”中填写该公网域名。管理端复制的图片链接与 API 返回地址会自动使用这个基地址。
+
+详细步骤见 `docs/security-deployment.md`。

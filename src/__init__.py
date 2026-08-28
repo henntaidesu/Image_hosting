@@ -1,0 +1,1 @@
+"""Picture Bed application package."""

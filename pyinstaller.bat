@@ -26,7 +26,7 @@ if errorlevel 1 (
 
 cd /d "%PROJECT_DIR%"
 
-python -c "import flask, PIL, waitress" >nul 2>&1
+python -c "import flask, PIL, pystray, waitress" >nul 2>&1
 if errorlevel 1 (
     echo [ERROR] Runtime dependencies are missing in "%ENV_NAME%".
     echo Run: python -m pip install -r requirements.txt
@@ -49,21 +49,26 @@ mkdir "%RELEASE_DIR%"
 mkdir "%SPEC_DIR%" 2>nul
 
 echo Packaging %APP_NAME%.exe...
-python -m PyInstaller --onefile --clean --noconfirm ^
+python -m PyInstaller --onefile --windowed --clean --noconfirm ^
     --name "%APP_NAME%" ^
-    --icon "static\favicon.ico" ^
-    --add-data "templates;templates" ^
-    --add-data "static;static" ^
+    --icon "%PROJECT_DIR%src\static\favicon.ico" ^
+    --add-data "%PROJECT_DIR%src\templates;src\templates" ^
+    --add-data "%PROJECT_DIR%src\static;src\static" ^
+    --hidden-import "tkinter" ^
+    --hidden-import "pystray._win32" ^
     --distpath "%RELEASE_DIR%" ^
     --workpath "%BUILD_DIR%" ^
     --specpath "%SPEC_DIR%" ^
-    serve.py
+    app.py
 
 if errorlevel 1 (
     echo [ERROR] Packaging failed.
     pause
     exit /b 1
 )
+
+echo Cleaning build files...
+if exist "%PROJECT_DIR%build" rmdir /s /q "%PROJECT_DIR%build"
 
 echo.
 echo ========================================
