@@ -79,6 +79,18 @@ def init_storage():
         image_columns = {row[1] for row in db.execute("PRAGMA table_info(images)")}
         if "storage_location_id" not in image_columns:
             db.execute("ALTER TABLE images ADD COLUMN storage_location_id INTEGER")
+        # sha256：内容指纹，调用方可据此确认「上传的和存下的是同一张图」。
+        # external_key：调用方自己的稳定标识（例如迁移时的原文件名）。它让上传变成幂等操作——
+        # 同一个 key 重复上传直接返回已存在的记录，迁移中断后重跑不会留下第二份文件。
+        if "sha256" not in image_columns:
+            db.execute("ALTER TABLE images ADD COLUMN sha256 TEXT")
+        if "external_key" not in image_columns:
+            db.execute("ALTER TABLE images ADD COLUMN external_key TEXT")
+        db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_images_external_key"
+            " ON images (project_id, external_key) WHERE external_key IS NOT NULL"
+        )
+        db.execute("CREATE INDEX IF NOT EXISTS idx_images_sha256 ON images (project_id, sha256)")
         location_columns = {row[1] for row in db.execute("PRAGMA table_info(storage_locations)")}
         if "is_active" not in location_columns:
             db.execute("ALTER TABLE storage_locations ADD COLUMN is_active INTEGER NOT NULL DEFAULT 0")
@@ -116,6 +128,7 @@ def init_storage():
             "admin_password_hash": generate_password_hash("admin"),
             "max_upload_mb": "20",
             "public_base_url": "",
+            "extra_trusted_hosts": "",
         }
         for key, value in defaults.items():
             db.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, value))

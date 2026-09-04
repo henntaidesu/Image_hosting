@@ -1,5 +1,6 @@
 """Image validation, storage routing, and upload persistence."""
 
+import hashlib
 import os
 import shutil
 import sqlite3
@@ -110,6 +111,31 @@ def available_storage_locations(project, file_size):
     return eligible, rejected
 
 
+def stream_sha256(stream):
+    """读完流算 sha256，再把游标复位——调用方后面还要用同一个流写盘。"""
+    digest = hashlib.sha256()
+    stream.seek(0)
+    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+        digest.update(chunk)
+    stream.seek(0)
+    return digest.hexdigest()
+
+
+def image_for_external_key(project_id, external_key):
+    """按调用方的稳定标识查已存在的图片；上传幂等与迁移续传都靠它。"""
+    if not external_key:
+        return None
+    return get_db().execute(
+        """
+        SELECT i.*, l.path AS location_path, l.name AS location_name
+        FROM images i
+        LEFT JOIN storage_locations l ON l.id = i.storage_location_id
+        WHERE i.project_id = ? AND i.external_key = ?
+        """,
+        (project_id, external_key),
+    ).fetchone()
+
+
 def image_with_location(project_id, stored_name):
     return get_db().execute(
         """
@@ -143,6 +169,16 @@ def public_image_url(slug, stored_name):
     return f"{base_url}{path}" if base_url else url_for("public_image", slug=slug, stored_name=stored_name, _external=True)
 
 
+def delete_image_record(project, image):
+    """删除一张图片的文件与索引行；文件已不在时也照常清掉索引（避免留下死记录）。"""
+    path = resolve_image_file(project, image)
+    if path:
+        path.unlink(missing_ok=True)
+    db = get_db()
+    db.execute("DELETE FROM images WHERE id = ?", (image["id"],))
+    db.commit()
+
+
 def image_is_safe(file):
     try:
         with warnings.catch_warnings():
@@ -162,18 +198,36 @@ def upload_limit_bytes():
     return int(get_setting("max_upload_mb")) * 1024 * 1024
 
 
-def save_upload(project, file):
+def save_upload(project, file, external_key=None):
+    """保存一次上传，返回 ``(stored_name, reused)``。
+
+    ``external_key`` 非空且已存在时不再写第二份文件，直接复用旧记录并返回 ``reused=True``；
+    迁移这类「跑一半断掉再重跑」的场景全靠这一条保证不产生重复图片。
+    """
+    external_key = (external_key or "").strip() or None
+    if external_key:
+        existing = image_for_external_key(project["id"], external_key)
+        if existing is not None:
+            return existing["stored_name"], True
     original_name = secure_filename(file.filename or "")
     extension = original_name.rsplit(".", 1)[-1].lower() if "." in original_name else ""
     if not original_name or extension not in config.ALLOWED_EXTENSIONS:
-        raise ValueError("只允许上传 PNG、JPG、GIF、WebP、BMP、ICO 或 AVIF 图片。")
-    if not image_is_safe(file):
+        raise ValueError("只允许上传图片（PNG/JPG/GIF/WebP/BMP/ICO/AVIF）或视频（MP4/MOV/WebM/M4V/MKV/AVI）。")
+    is_video = extension in config.VIDEO_EXTENSIONS
+    # 视频没法用 PIL 校验像素/帧数，也不生成缩略图——按原文件存取。图片仍走原来的安全校验。
+    if not is_video and not image_is_safe(file):
         raise ValueError("文件内容不是有效图片。")
     file.stream.seek(0, os.SEEK_END)
     size = file.stream.tell()
     file.stream.seek(0)
-    if size > upload_limit_bytes():
+    # 视频用单独的、更宽松的上限；图片沿用系统设置里的 max_upload_mb。
+    if is_video:
+        video_limit = config.MAX_VIDEO_UPLOAD_MB * 1024 * 1024
+        if size > video_limit:
+            raise ValueError(f"视频过大，最大允许 {config.MAX_VIDEO_UPLOAD_MB} MB。")
+    elif size > upload_limit_bytes():
         raise ValueError(f"文件过大，最大允许 {get_setting('max_upload_mb')} MB。")
+    digest = stream_sha256(file.stream)
     stored_name = f"{uuid.uuid4().hex}.{extension}"
     locations, rejected = available_storage_locations(project, size)
     if not locations:
@@ -200,11 +254,19 @@ def save_upload(project, file):
             if not location["is_active"]:
                 make_storage_location_active(project["id"], location["id"])
             db.execute(
-                "INSERT INTO images (project_id, storage_location_id, stored_name, original_name, content_type, size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (project["id"], location["id"], stored_name, original_name, file.mimetype or "application/octet-stream", target.stat().st_size, now()),
+                "INSERT INTO images (project_id, storage_location_id, stored_name, original_name, content_type, size, sha256, external_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (project["id"], location["id"], stored_name, original_name, file.mimetype or "application/octet-stream", target.stat().st_size, digest, external_key, now()),
             )
             db.commit()
-            return stored_name
+            return stored_name, False
+        except sqlite3.IntegrityError:
+            # 同一个 external_key 的并发上传：另一路已经写进去了，删掉自己这份，复用对方的记录。
+            target.unlink(missing_ok=True)
+            get_db().rollback()
+            existing = image_for_external_key(project["id"], external_key) if external_key else None
+            if existing is None:
+                raise
+            return existing["stored_name"], True
         except sqlite3.Error as error:
             target.unlink(missing_ok=True)
             raise ValueError(f"图片已写入但无法保存索引：{error}") from error

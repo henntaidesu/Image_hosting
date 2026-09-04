@@ -47,7 +47,40 @@ curl -X POST "http://127.0.0.1:9990/api/v1/projects/website/images" \
   -F "file=@./logo.png"
 ```
 
-服务返回：`{"url":"公开图片地址","path":"/images/website/...","project":"website"}`。
+服务返回：`{"url":"公开图片地址","path":"/images/website/...","project":"website",...}`。
+
+### API 一览（`/api/v1`）
+
+全部只认 `Authorization: Bearer <项目 API Token>`，只回 JSON。
+
+| 方法 | 路径 | 用途 |
+|------|------|------|
+| GET | `/api/v1/projects/<slug>/ping` | 连接自检：项目信息 + 服务端限制（单文件上限、允许扩展名、缩略图档位） |
+| POST | `/api/v1/projects/<slug>/images` | 上传。可带 `external_key`（幂等）与 `sha256`（内容校验） |
+| GET | `/api/v1/projects/<slug>/images` | 列表，按 `after_id` 游标翻页 |
+| POST | `/api/v1/projects/<slug>/images/lookup` | 按 `external_keys` 数组批量查在不在 |
+| GET | `/api/v1/projects/<slug>/images/<存储名>` | 单张元数据 |
+| DELETE | `/api/v1/projects/<slug>/images/<存储名>` | 删除（幂等：删不存在的也返回成功） |
+
+**`external_key` 是接入方自己的稳定标识**（例如原文件名）。带上它之后上传就是幂等的：同一个
+key 重复上传直接返回已有记录、不产生第二份文件。搬运一批历史图片时中断再重跑，靠的就是这个。
+
+### 缩略图
+
+公开图片地址支持 `?w=<像素>`，首次请求生成一份 JPEG 缩略图落盘，之后命中缓存：
+
+```
+https://images.example.com/images/website/xxxx.png?w=300
+```
+
+宽度只接受固定档位（100 / 200 / 300 / 400 / 560 / 800 / 1200），请求值向上取整到最近的一档。
+不设白名单的话，任何人都能用连续变化的 `w` 逼服务生成上千份不同尺寸，把 CPU 和磁盘一起吃光。
+
+### 内网直连要填「附加访问主机名」
+
+一旦在「系统设置」里填了公开访问基地址，服务默认只接受**该域名**的请求。同机或局域网里的
+程序按 IP 直连调 API（例如 `http://192.168.1.5:9990`）会被判成非法主机而 400。把这些地址填进
+「附加访问主机名」即可（空格或逗号分隔，可省略端口）。
 
 ## 对外部署
 

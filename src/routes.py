@@ -3,14 +3,15 @@
 import secrets
 import sqlite3
 
-from flask import abort, current_app, flash, jsonify, redirect, render_template, request, send_from_directory, session, url_for
+from flask import abort, current_app, flash, redirect, render_template, request, send_from_directory, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from . import config
+from . import config, derivatives
+from .api_v1 import register_api_routes
 from .database import get_db, get_setting, now, set_setting
 from .security import admin_required, configure_runtime_security, csrf_token, safe_redirect_target, validate_public_base_url
 from .storage import (
-    StorageUnavailableError,
+    delete_image_record,
     ensure_storage_path_available,
     image_with_location,
     make_storage_location_active,
@@ -64,6 +65,7 @@ def settings():
     if request.method == "POST":
         max_upload_mb = request.form.get("max_upload_mb", "").strip()
         public_base_url = request.form.get("public_base_url", "").strip()
+        extra_trusted_hosts = request.form.get("extra_trusted_hosts", "").strip()
         password = request.form.get("password", "")
         password_confirm = request.form.get("password_confirm", "")
         try:
@@ -88,10 +90,16 @@ def settings():
             set_setting("admin_password_hash", generate_password_hash(password))
         set_setting("max_upload_mb", str(max_upload_number))
         set_setting("public_base_url", public_base_url)
-        configure_runtime_security(current_app, max_upload_number, public_base_url)
+        set_setting("extra_trusted_hosts", extra_trusted_hosts)
+        configure_runtime_security(current_app, max_upload_number, public_base_url, extra_trusted_hosts)
         flash("系统设置已保存。", "success")
         return redirect(url_for("settings"))
-    return render_template("settings.html", max_upload_mb=get_setting("max_upload_mb"), public_base_url=get_setting("public_base_url"))
+    return render_template(
+        "settings.html",
+        max_upload_mb=get_setting("max_upload_mb"),
+        public_base_url=get_setting("public_base_url"),
+        extra_trusted_hosts=get_setting("extra_trusted_hosts"),
+    )
 
 
 @admin_required
@@ -304,11 +312,8 @@ def delete_image(slug, stored_name):
     image = image_with_location(project["id"], stored_name) if project else None
     if not image:
         abort(404)
-    path = resolve_image_file(project, image)
-    if path:
-        path.unlink()
-    get_db().execute("DELETE FROM images WHERE id = ?", (image["id"],))
-    get_db().commit()
+    delete_image_record(project, image)
+    derivatives.purge_derivatives(slug, stored_name)
     flash("图片已删除。", "success")
     return redirect(url_for("project_detail", slug=slug))
 
@@ -324,25 +329,12 @@ def rotate_token(slug):
     return redirect(url_for("project_detail", slug=slug))
 
 
-def api_upload(slug):
-    project = project_for_slug(slug)
-    token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-    if not project or not token or not secrets.compare_digest(token, project["api_token"]):
-        return jsonify(error="无效的项目或 API Token。"), 401
-    file = request.files.get("file")
-    if not file:
-        return jsonify(error="请以 multipart/form-data 的 file 字段提交图片。"), 400
-    try:
-        stored_name = save_upload(project, file)
-    except StorageUnavailableError as error:
-        return jsonify(error=str(error)), 507
-    except ValueError as error:
-        return jsonify(error=str(error)), 400
-    image_url = public_image_url(slug, stored_name)
-    return jsonify(url=image_url, path=f"/images/{slug}/{stored_name}", project=slug), 201
-
-
 def public_image(slug, stored_name):
+    """公开图片。``?w=<像素>`` 返回缩略图（宽度收敛到固定档位，首次生成后落盘缓存）。
+
+    没有这个参数的话，接入方的列表页要么加载整张原图，要么把原图拉回自己那边再缩放——
+    两种做法都把图床本该省下的带宽原样还了回去。
+    """
     project = project_for_slug(slug)
     if not project:
         abort(404)
@@ -352,6 +344,11 @@ def public_image(slug, stored_name):
     path = resolve_image_file(project, image)
     if not path:
         abort(404)
+    width = derivatives.normalize_width(request.args.get("w"))
+    if width is not None:
+        thumbnail = derivatives.build_derivative(path, slug, stored_name, width)
+        if thumbnail is not None:
+            return send_from_directory(thumbnail.parent, thumbnail.name, conditional=True)
     return send_from_directory(path.parent, path.name, conditional=True)
 
 
@@ -371,5 +368,5 @@ def register_routes(app):
     app.add_url_rule("/projects/<slug>/upload", "admin_upload", admin_upload, methods=["POST"])
     app.add_url_rule("/projects/<slug>/images/<stored_name>/delete", "delete_image", delete_image, methods=["POST"])
     app.add_url_rule("/projects/<slug>/token", "rotate_token", rotate_token, methods=["POST"])
-    app.add_url_rule("/api/v1/projects/<slug>/images", "api_upload", api_upload, methods=["POST"])
     app.add_url_rule("/images/<slug>/<stored_name>", "public_image", public_image, methods=["GET"])
+    register_api_routes(app)

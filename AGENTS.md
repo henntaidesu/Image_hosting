@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-`app.py` is the only executable entry point. Application code lives in `src/`: `app_factory.py` constructs Flask, `routes.py` defines HTTP endpoints, `database.py` owns SQLite access, `security.py` handles request protections, `storage.py` validates and routes images, and `server.py` controls Waitress and the packaged desktop UI. Server-rendered pages are in `src/templates/`; browser assets are in `src/static/`. Security deployment documentation lives in `docs/`. Tests belong in `tests/` and use isolated temporary directories. Runtime state—SQLite data and local uploads—belongs in `data/` and is intentionally ignored by Git.
+`app.py` is the only executable entry point. Application code lives in `src/`: `app_factory.py` constructs Flask, `routes.py` defines the admin HTML endpoints, `api_v1.py` defines the token-authenticated JSON API under `/api/v1`, `database.py` owns SQLite access, `security.py` handles request protections, `storage.py` validates and routes images, `derivatives.py` generates and caches on-demand thumbnails, and `server.py` controls Waitress and the packaged desktop UI. Endpoint names starting with `api_` are exempt from CSRF (they carry a Bearer token instead of a session). Server-rendered pages are in `src/templates/`; browser assets are in `src/static/`. Security deployment documentation lives in `docs/`. Tests belong in `tests/` and use isolated temporary directories. Runtime state—SQLite data and local uploads—belongs in `data/` and is intentionally ignored by Git.
 
 ## Build, Test, and Development Commands
 
