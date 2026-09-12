@@ -5,7 +5,7 @@ from datetime import timedelta
 from functools import wraps
 from urllib.parse import urlsplit
 
-from flask import abort, redirect, request, session, url_for
+from flask import abort, current_app, redirect, request, session, url_for
 
 from . import config
 from .database import get_setting
@@ -41,11 +41,49 @@ def configured_trusted_hosts(public_base_url=None, extra_hosts=None):
     return hosts
 
 
+def request_body_limit_bytes(max_upload_mb=None):
+    """WSGI 层允许的最大请求体（字节）。
+
+    取「图片上限」与「视频上限」中的较大者。这是一道**粗闸门**，只用来挡住明显异常的请求体；
+    按类型区分的判断在 ``storage.save_upload`` 里，那里能回一句「文件过大，最大允许 N MB」的
+    JSON 错误。把闸门压到图片上限会让 ``config.MAX_VIDEO_UPLOAD_MB`` 形同虚设——比图片上限
+    大的视频在进入视图之前就被 Werkzeug 用一张 HTML 413 页面拦掉，谁也说不清是哪一层拒的。
+    """
+    if max_upload_mb is None:
+        max_upload_mb = get_setting("max_upload_mb")
+    try:
+        image_mb = int(max_upload_mb)
+    except (TypeError, ValueError):
+        image_mb = 0
+    return max(image_mb, config.MAX_VIDEO_UPLOAD_MB) * 1024 * 1024
+
+
+def refresh_upload_limit():
+    """每个带请求体的请求，都按**当前设置**重算一次上限。
+
+    ``MAX_CONTENT_LENGTH`` 原先只在进程启动和「保存系统设置」那一刻写进 ``app.config``，
+    于是「设置里写着 200 MB、进程里仍拦在 2 MB」是可能的状态；而 ``/api/v1/.../ping`` 报的是
+    **设置值**，它会理直气壮地告诉接入方 200 MB。接入方据此做的预检因此全部落空，最后只收到
+    一张没有上下文的 HTML 413 错误页。报出去的数和拦下来的数必须同源，这里就是那一处。
+
+    只在带请求体的方法上现查：GET 取图不该为此多开一次 sqlite 连接。多线程下两个请求可能同时
+    写这个键，但写进去的是同一个值，无所谓。
+    """
+    if request.method in {"POST", "PUT", "PATCH"}:
+        current_app.config["MAX_CONTENT_LENGTH"] = request_body_limit_bytes()
+
+
 def configure_runtime_security(app, max_upload_mb=None, public_base_url=None, extra_hosts=None):
-    max_upload_mb = int(max_upload_mb if max_upload_mb is not None else get_setting("max_upload_mb"))
     app.config.update(
-        MAX_CONTENT_LENGTH=max_upload_mb * 1024 * 1024,
-        MAX_FORM_MEMORY_SIZE=64 * 1024,
+        MAX_CONTENT_LENGTH=request_body_limit_bytes(max_upload_mb),
+        # 这个值**不只**限制普通表单字段，它同时是 multipart 解码器内部缓冲区的上限
+        # （werkzeug/sansio/multipart.py::receive_data，文件分片一样计入），所以它必须
+        # 显著大于 MultiPartParser 的 64 KB 读块。原先取的正是 64 KB：解码器每收到一个
+        # 64 KB 分片，缓冲区里只要还剩一点上一片的尾巴，len(buffer)+len(data) 就越限并
+        # 直接抛 413。尾巴留多长取决于分片末尾到最后一个 CR/LF 的距离，也就是取决于文件
+        # 内容——于是表现为「同样大小的图，有的传得上去有的传不上去」，看着像随机故障。
+        # 实测 120 张真实商品图：64 KB 时 19 张失败（657 KB ~ 6.9 MB），1 MB 时 0 张。
+        MAX_FORM_MEMORY_SIZE=1024 * 1024,
         MAX_FORM_PARTS=config.MAX_UPLOAD_FILES + 10,
         TRUSTED_HOSTS=configured_trusted_hosts(public_base_url, extra_hosts),
     )
@@ -123,5 +161,8 @@ def init_app(app):
         PREFERRED_URL_SCHEME="http" if config.INSECURE_LOCAL_MODE else "https",
     )
     configure_runtime_security(app)
+    # 必须排在 validate_csrf 前面：后者会读 request.form，表单一旦在那里被解析，
+    # 用的就是刷新之前的旧上限。
+    app.before_request(refresh_upload_limit)
     app.before_request(validate_csrf)
     app.after_request(set_security_headers)

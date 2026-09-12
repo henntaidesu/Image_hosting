@@ -2,7 +2,7 @@
 setlocal EnableExtensions
 
 set "PROJECT_DIR=%~dp0"
-set "ENV_NAME=picture-bed"
+set "ENV_NAME=Image_hosting"
 set "CONDA_BAT=%USERPROFILE%\anaconda3\condabin\conda.bat"
 set "APP_NAME=ImageHosting"
 set "RELEASE_DIR=%PROJECT_DIR%Releases\%APP_NAME%"

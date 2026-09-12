@@ -1,7 +1,7 @@
 @echo off
 setlocal
 
-set "ENV_NAME=picture-bed"
+set "ENV_NAME=Image_hosting"
 set "PROJECT_DIR=%~dp0"
 set "CONDA_BAT=%USERPROFILE%\anaconda3\condabin\conda.bat"
 
